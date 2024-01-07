@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"reflect"
 	"strconv"
 	"syscall"
 	"unsafe"
@@ -102,7 +101,7 @@ func mountFuseT(
 			if _, err = local_mon_file.Read(reply); err != nil {
 				err = fmt.Errorf("fuse-t failed: %v", err)
 			}
-			if !reflect.DeepEqual(reply, []byte{0x0, 0x0, 0x0, 0x0}) {
+			if !bytes.Equal(reply, []byte{0x0, 0x0, 0x0, 0x0}) {
 				err = fmt.Errorf("moint failed")
 			}
 		}
