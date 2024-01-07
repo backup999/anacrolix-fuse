@@ -113,8 +113,6 @@ func mountFuseT(
 	return local_file, fuseTBackendState{
 		// Prevent these files from being GCed.
 		extraFiles: []*os.File{
-			remote_file,
-			remote_mon_file,
 			local_mon_file,
 		},
 	}, err
