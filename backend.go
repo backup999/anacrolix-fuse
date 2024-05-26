@@ -1,7 +1,6 @@
 package fuse
 
 import (
-	"github.com/anacrolix/log"
 	"os"
 	"strings"
 )
@@ -28,11 +27,7 @@ func initForcedBackend() {
 }
 
 func getForcedBackend() (ret Backend) {
-	ret = Backend(strings.ToUpper(strings.TrimSpace(os.Getenv("FUSE_FORCE_BACKEND"))))
-	if !ret.IsUnset() {
-		Logger.Levelf(log.Info, "forcing backend %v", ret)
-	}
-	return
+	return Backend(strings.ToUpper(strings.TrimSpace(os.Getenv("FUSE_FORCE_BACKEND"))))
 }
 
 // Extra state to be managed per backend.

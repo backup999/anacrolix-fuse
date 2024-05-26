@@ -610,6 +610,15 @@ func (c *Conn) ReadSingle(buf []byte) (int, error) {
 	}
 
 	l := *(*uint32)(unsafe.Pointer(&buf[0]))
+	// check message size
+	if l <= 4 {
+		// short / EOF message
+		return int(l), nil
+	}
+	if int64(l) > int64(len(buf)) {
+		return int(l), errors.New("fuse: message too long")
+	}
+
 	// read remaining request
 	if n, err := readAll(c.fd(), buf[4:l]); err != nil {
 		return n, err
