@@ -124,8 +124,9 @@ type Conn struct {
 
 	// File handle for kernel communication. Only safe to access if
 	// rio or wio is held.
-	dev          *os.File
-	backend      Backend
+	dev     *os.File
+	backend Backend
+	// Nil if there's nothing to clean up on Close.
 	backendState backendState
 	wio          sync.RWMutex
 	rio          sync.RWMutex
@@ -565,7 +566,9 @@ func (c *Conn) Close() error {
 	defer c.wio.Unlock()
 	c.rio.Lock()
 	defer c.rio.Unlock()
-	c.backendState.Drop()
+	if c.backendState != nil {
+		c.backendState.Drop()
+	}
 	return c.dev.Close()
 }
 
@@ -2447,7 +2450,7 @@ func (r *FlushRequest) Respond() {
 type RemoveRequest struct {
 	Header `json:"-"`
 	Name   string // name of the entry to remove
-	Dir    bool   // is this rmdir?
+	Dir    bool // is this rmdir?
 }
 
 var _ Request = (*RemoveRequest)(nil)

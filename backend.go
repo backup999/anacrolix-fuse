@@ -45,7 +45,3 @@ func (bes fuseTBackendState) Drop() {
 		f.Close()
 	}
 }
-
-type nopBackendState struct{}
-
-func (nopBackendState) Drop() {}

@@ -51,8 +51,7 @@ func mountFuseT(
 
 	defer syscall.Close(remote_mon)
 
-	args := []string{
-	}
+	args := []string{}
 	if conf.isReadonly() {
 		args = append(args, "-r")
 	}
@@ -225,7 +224,6 @@ func mount(
 
 	f = os.NewFile(uintptr(dup), "macfuse")
 	be = osxfuseBackend
-	bes = nopBackendState{}
 	return
 }
 
