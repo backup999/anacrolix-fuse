@@ -91,19 +91,17 @@ func mountFuseT(
 
 	cmd.Process.Release()
 	go func() {
-		var err error
-		if _, err = local_mon_file.Write([]byte("mount")); err != nil {
-			err = fmt.Errorf("fuse-t failed: %v", err)
-		} else {
-			reply := make([]byte, 4)
-			if _, err = local_mon_file.Read(reply); err != nil {
-				err = fmt.Errorf("fuse-t failed: %v", err)
-			}
-			if !bytes.Equal(reply, []byte{0x0, 0x0, 0x0, 0x0}) {
-				err = fmt.Errorf("moint failed")
+		_, err := local_mon_file.Write([]byte("mount"))
+		if err == nil {
+			var reply [4]byte
+			_, err = local_mon_file.Read(reply[:])
+			if err == nil && reply != [4]byte{} {
+				err = fmt.Errorf("expected 4 zero bytes, got %v", reply)
 			}
 		}
-
+		if err != nil {
+			err = fmt.Errorf("fuse-t mount failed: %w", err)
+		}
 		*errp = err
 		close(ready)
 	}()

@@ -107,10 +107,11 @@ import (
 	"io"
 	"os"
 	"strings"
-	"sync"
 	"syscall"
 	"time"
 	"unsafe"
+
+	"github.com/anacrolix/sync"
 )
 
 // A Conn represents a connection to a mounted FUSE file system.
@@ -122,14 +123,18 @@ type Conn struct {
 	// after Ready is closed.
 	MountError error
 
-	// File handle for kernel communication. Only safe to access if
-	// rio or wio is held.
-	dev     *os.File
+	// Synchronizes fd inside dev.
+	fdMu sync.RWMutex
+	// File handle for kernel communication.
+	dev *os.File
+
 	backend Backend
 	// Nil if there's nothing to clean up on Close.
 	backendState backendState
-	wio          sync.RWMutex
-	rio          sync.RWMutex
+	// Ensures related write operations are contiguous.
+	wio sync.RWMutex
+	// Ensures related read operations are contiguous.
+	rio sync.RWMutex
 
 	// Protocol version negotiated with initRequest/initResponse.
 	proto Protocol
@@ -181,7 +186,7 @@ func Mount(dir string, options ...MountOption) (*Conn, error) {
 
 	if err := initMount(c, &conf); err != nil {
 		c.Close()
-		if err == ErrClosedWithoutInit {
+		if errors.Is(err, ErrClosedWithoutInit) {
 			// see if we can provide a better error
 			<-c.Ready
 			if err := c.MountError; err != nil {
@@ -191,7 +196,7 @@ func Mount(dir string, options ...MountOption) (*Conn, error) {
 		return nil, err
 	}
 
-	return c, c.MountError
+	return c, nil
 }
 
 type OldVersionError struct {
@@ -562,18 +567,18 @@ func (malformedMessage) String() string {
 
 // Close closes the FUSE connection.
 func (c *Conn) Close() error {
-	c.wio.Lock()
-	defer c.wio.Unlock()
-	c.rio.Lock()
-	defer c.rio.Unlock()
 	if c.backendState != nil {
 		c.backendState.Drop()
 	}
+	c.fdMu.Lock()
+	defer c.fdMu.Unlock()
 	return c.dev.Close()
 }
 
 // caller must hold wio or rio
 func (c *Conn) fd() int {
+	c.fdMu.RLock()
+	defer c.fdMu.RUnlock()
 	return int(c.dev.Fd())
 }
 
@@ -588,27 +593,13 @@ func (c *Conn) Features() InitFlags {
 	return c.flags
 }
 
-func readAll(fd int, dest []byte) (int, error) {
-	offset := 0
-
-	for offset < len(dest) {
-		// read the remaining buffer
-		n, err := syscall.Read(fd, dest[offset:])
-		if n == 0 && err == nil {
-			// remote fd closed
-			return n, io.EOF
-		}
-		offset += n
-		if err != nil {
-			return offset, err
-		}
-	}
-	return offset, nil
+func (c *Conn) readAll(dest []byte) (int, error) {
+	return io.ReadFull(c.dev, dest)
 }
 
 func (c *Conn) ReadSingle(buf []byte) (int, error) {
 	// read request length
-	if _, err := readAll(c.fd(), buf[0:4]); err != nil {
+	if _, err := c.readAll(buf[0:4]); err != nil {
 		return 0, err
 	}
 
@@ -623,7 +614,7 @@ func (c *Conn) ReadSingle(buf []byte) (int, error) {
 	}
 
 	// read remaining request
-	if n, err := readAll(c.fd(), buf[4:l]); err != nil {
+	if n, err := c.readAll(buf[4:l]); err != nil {
 		return n, err
 	}
 	return int(l), nil
@@ -641,17 +632,21 @@ loop:
 	var err error
 
 	if c.backend.IsFuseT() {
+		// Donno why Fishman used locks around this. I'm not even sure he needs to be using raw file
+		// descriptors.
 		n, err = c.ReadSingle(m.buf)
 	} else {
-		n, err = syscall.Read(c.fd(), m.buf)
+		// Reinstated Virtanen's read lock here. It's pedantic, but I think it protects extracting
+		// the FD from the file so it can be closed separately without a race.
+		n, err = c.dev.Read(m.buf)
 	}
 	c.rio.Unlock()
-	if err == syscall.EINTR {
+	if errors.Is(err, syscall.EINTR) {
 		// OSXFUSE sends EINTR to userspace when a request interrupt
 		// completed before it got sent to userspace?
 		goto loop
 	}
-	if err != nil && err != syscall.ENODEV {
+	if err != nil && !errors.Is(err, syscall.ENODEV) {
 		putMessage(m)
 		return nil, err
 	}
@@ -2450,7 +2445,7 @@ func (r *FlushRequest) Respond() {
 type RemoveRequest struct {
 	Header `json:"-"`
 	Name   string // name of the entry to remove
-	Dir    bool // is this rmdir?
+	Dir    bool   // is this rmdir?
 }
 
 var _ Request = (*RemoveRequest)(nil)
